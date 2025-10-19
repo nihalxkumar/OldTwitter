@@ -142,6 +142,7 @@ async function loadVars() {
                 "customDownloadTemplate",
                 "showBoringIndicators",
                 "useRetweetedId",
+                "zenMode",
             ],
             (data) => {
                 // default variables
@@ -448,6 +449,15 @@ async function loadVars() {
                     chrome.storage.sync.set(
                         {
                             transitionProfileBanner: false,
+                        },
+                        () => {}
+                    );
+                }
+                if (typeof data.zenMode !== "boolean") {
+                    data.zenMode = false;
+                    chrome.storage.sync.set(
+                        {
+                            zenMode: false,
                         },
                         () => {}
                     );

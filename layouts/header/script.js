@@ -3210,6 +3210,10 @@ setInterval(() => {
         let tle = document.getElementById('timeline');
         if(!tle) tle = document.getElementById('list-tweets');
         document.addEventListener('keydown', async e => {
+            // In zen mode, completely skip S/W keys to let home script handle them
+            if(vars && vars.zenMode && (e.keyCode === 83 || e.keyCode === 87)) {
+                return;
+            }
             if(e.ctrlKey || keysHeld['KeyG']) return;
             // reply box
             if(e.target.className === 'tweet-reply-text') {

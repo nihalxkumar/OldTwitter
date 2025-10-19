@@ -144,6 +144,19 @@ body {
     width: 590px
 }
 
+/* Zen mode layout */
+#timeline.zen-mode {
+    min-height: 400px;
+}
+.zen-indicator {
+    color: var(--light-gray);
+    font-size: 12px;
+    margin-top: 8px;
+}
+.zen-indicator .zen-counter {
+    margin-right: 8px;
+}
+
 .tweet {
     background-color: var(--background-color);
     border-left: 1px solid var(--border);

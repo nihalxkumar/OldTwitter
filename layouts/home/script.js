@@ -16,6 +16,11 @@ let selectedCircle = undefined;
 let cursorBottom, cursorTop;
 let repliesToIgnore = [];
 
+// Zen mode state
+let currentZenIndex = 0;
+let zenTimelineCache = [];
+let isZenModeActive = false;
+
 function fixTweetThreadLine() {
     let tweets = document.getElementsByClassName('tweet');
     for(let i = 0; i < tweets.length; i++) {
@@ -123,6 +128,10 @@ function updateUserData() {
     });
 }
 async function updateTimeline(mode = 'rewrite') {
+    // Wait for vars to be loaded if not available
+    if(!vars) {
+        await varsPromise;
+    }
     seenThreads = [];
     if (timeline.data.length === 0) {
         document.getElementById('timeline').innerHTML = html``;
@@ -271,6 +280,19 @@ function renderUserData() {
 async function renderTimeline(options = {}) {
     if(!options.mode) options.mode = 'rewrite';
     if(!options.data) options.data = timeline.data;
+    
+    // Route to zen mode if enabled
+    if(vars && vars.zenMode) {
+        isZenModeActive = true;
+        return await renderZenTimeline(options);
+    } else {
+        // Disable zen mode styling if switching back to normal mode
+        if(isZenModeActive) {
+            document.getElementById('timeline').classList.remove('zen-mode');
+            isZenModeActive = false;
+        }
+    }
+    
     let timelineContainer = document.getElementById('timeline');
     if(options.mode === 'rewrite') {
         if(options.suspended) {
@@ -357,6 +379,211 @@ async function renderTimeline(options = {}) {
     setTimeout(fixTweetThreadLine, 100);
     return true;
 }
+
+// Zen mode rendering function
+async function renderZenTimeline(options = {}) {
+    if(!options.mode) options.mode = 'rewrite';
+    if(!options.data) options.data = timeline.data;
+    
+    let timelineContainer = document.getElementById('timeline');
+    if(!timelineContainer) {
+        console.warn('Zen Mode: Timeline container not found');
+        return false;
+    }
+    
+    // Update zen cache when new data arrives
+    if(options.mode === 'rewrite') {
+        zenTimelineCache = options.data.slice();
+        // Only reset index if this is the initial load, not navigation
+        if(!options.navigation) {
+            currentZenIndex = 0;
+        }
+        timelineContainer.innerHTML = '';
+    } else if(options.mode === 'append') {
+        // Add new tweets to the end of cache
+        zenTimelineCache = zenTimelineCache.concat(options.data);
+    } else if(options.mode === 'prepend') {
+        // Add new tweets to beginning and adjust current index
+        let oldCacheLength = zenTimelineCache.length;
+        zenTimelineCache = options.data.concat(zenTimelineCache);
+        currentZenIndex += options.data.length; // Adjust index to maintain current tweet
+    }
+    
+    // Render only the current tweet
+    if(zenTimelineCache.length === 0) {
+        timelineContainer.innerHTML = '<div class="no-tweets">No tweets to display</div>';
+        return true;
+    }
+    
+    // Ensure current index is within bounds
+    if(currentZenIndex >= zenTimelineCache.length) {
+        currentZenIndex = zenTimelineCache.length - 1;
+    }
+    if(currentZenIndex < 0) {
+        currentZenIndex = 0;
+    }
+    
+    let currentTweet = zenTimelineCache[currentZenIndex];
+    
+    if(!currentTweet) {
+        return true;
+    }
+    
+    // Clear timeline and render current tweet
+    timelineContainer.innerHTML = '';
+    timelineContainer.classList.add('zen-mode');
+    
+    // Handle link colors for zen mode
+    if(vars.slowLinkColorsInTL) {
+        let userId = currentTweet.user.id_str;
+        if(!linkColors[userId]) {
+            let linkData = await getLinkColors([userId]);
+            if(linkData && linkData.length > 0) {
+                linkColors[linkData[0].id] = linkData[0].color;
+            }
+        }
+    }
+    
+    // Render the tweet
+    if (currentTweet.retweeted_status) {
+        let o = {
+            top: {
+                text: html`<a href="/${currentTweet.user.screen_name}">${currentTweet.user.name}</a> ${LOC.retweeted.message}`,
+                icon: "\uf006",
+                color: "#77b255",
+                class: 'retweet-label'
+            },
+            translate: vars.autotranslateProfiles.includes(currentTweet.user.id_str),
+            zenMode: true
+        };
+        await appendTweet(currentTweet.retweeted_status, timelineContainer, o);
+    } else {
+        await appendTweet(currentTweet, timelineContainer, {
+            bigFont: currentTweet.full_text.length < 75,
+            zenMode: true
+        });
+    }
+    
+    // Add zen mode navigation indicator
+    let zenIndicator = document.createElement('div');
+    zenIndicator.classList.add('zen-indicator');
+    zenIndicator.innerHTML = `
+        <span class="zen-counter">${currentZenIndex + 1} of ${zenTimelineCache.length}</span>
+        <span class="zen-navigation">Use S/W keys or scroll to navigate</span>
+    `;
+    timelineContainer.appendChild(zenIndicator);
+    
+    // Parse emojis if enabled
+    if(vars.enableTwemoji) {
+        twemoji.parse(timelineContainer);
+    }
+    
+    document.getElementById('loading-box').hidden = true;
+    document.getElementById('tweets-loading').hidden = true;
+    document.getElementById('load-more').hidden = true; // Hide load more in zen mode
+    
+    // Scroll to top to ensure tweet is visible
+    window.scrollTo(0, 0);
+    
+    return true;
+}
+
+// Zen mode navigation functions
+async function navigateZenMode(direction) {
+    if(!vars || !vars.zenMode || zenTimelineCache.length === 0) return;
+    
+    let oldIndex = currentZenIndex;
+    
+    try {
+    
+    if(direction === 'next') {
+        if(currentZenIndex < zenTimelineCache.length - 1) {
+            currentZenIndex++;
+        } else {
+            // At end, check if we need to load more tweets
+            if(zenTimelineCache.length > 0) {
+                document.getElementById('load-more').click();
+            }
+            return;
+        }
+    } else if(direction === 'prev') {
+        if(currentZenIndex > 0) {
+            currentZenIndex--;
+        } else {
+            return; // Can't go before first tweet
+        }
+    }
+    
+    // Only re-render if index actually changed
+    if(oldIndex !== currentZenIndex) {
+        await renderZenTimeline({ mode: 'rewrite', data: zenTimelineCache, navigation: true });
+    }
+    
+    // Auto-load more tweets when approaching the end
+    if(currentZenIndex >= zenTimelineCache.length - 3 && zenTimelineCache.length > 0) {
+        const loadMoreBtn = document.getElementById('load-more');
+        if(loadMoreBtn) {
+            loadMoreBtn.click();
+        }
+    }
+    
+    } catch(error) {
+        console.error('Zen Mode navigation error:', error);
+    }
+}
+
+// Zen mode input handlers
+async function handleZenKeydown(e) {
+    // Early return for non-zen mode or disabled hotkeys
+    if(!vars) {
+        await varsPromise;
+    }
+    if(!vars.zenMode || vars.disableHotkeys) return;
+    
+    // Ignore input fields
+    if(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+    
+    // Handle S/W navigation
+    if(e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        navigateZenMode('next');
+    } else if(e.key === 'w' || e.key === 'W') {
+        e.preventDefault();
+        navigateZenMode('prev');
+    }
+}
+
+let zenWheelAccumulator = 0;
+let zenWheelTimeout;
+async function handleZenWheel(e) {
+    // Early return for non-zen mode
+    if(!vars) {
+        await varsPromise;
+    }
+    if(!vars.zenMode) return;
+    
+    // Ignore when interacting with media scrollers
+    const target = e.target;
+    if(target && (target.closest && (target.closest('video') || target.closest('.tweet-media')))) return;
+    
+    zenWheelAccumulator += e.deltaY;
+    clearTimeout(zenWheelTimeout);
+    
+    // Debounce small wheel jitters
+    zenWheelTimeout = setTimeout(() => {
+        if(Math.abs(zenWheelAccumulator) < 20) { 
+            zenWheelAccumulator = 0; 
+            return; 
+        }
+        if(zenWheelAccumulator > 0) {
+            navigateZenMode('next');
+        } else {
+            navigateZenMode('prev');
+        }
+        zenWheelAccumulator = 0;
+    }, 60);
+}
+
 function renderNewTweetsButton() {
     if (timeline.toBeUpdated > 0) {
         document.getElementById("new-tweets-bug-fix").innerHTML = html`
@@ -379,7 +606,7 @@ function renderNewTweetsButton() {
 
 setTimeout(async () => {
     if(!vars) {
-        await loadVars();
+        await varsPromise;
     }
     await new Promise(resolve => {
         chrome.storage.local.get(['seenAlgoTweets'], data => {
@@ -398,6 +625,10 @@ setTimeout(async () => {
             document.getElementById('load-more').click();
         }
     }, { passive: true });
+
+    // Zen mode listeners - use window to ensure we catch all keydown events
+    window.addEventListener('keydown', handleZenKeydown, { passive: false, capture: true });
+    document.addEventListener('wheel', handleZenWheel, { passive: true });
 
     document.addEventListener('clearActiveTweet', () => {
         if(activeTweet) {
