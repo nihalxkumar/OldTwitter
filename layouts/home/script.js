@@ -281,6 +281,11 @@ async function renderTimeline(options = {}) {
     if(!options.mode) options.mode = 'rewrite';
     if(!options.data) options.data = timeline.data;
     
+    // Wait for vars to be loaded if not available
+    if(!vars) {
+        await varsPromise;
+    }
+    
     // Route to zen mode if enabled
     if(vars && vars.zenMode) {
         isZenModeActive = true;
@@ -290,6 +295,13 @@ async function renderTimeline(options = {}) {
         if(isZenModeActive) {
             document.getElementById('timeline').classList.remove('zen-mode');
             isZenModeActive = false;
+            currentZenIndex = 0;
+            zenTimelineCache = [];
+            // Clear any active tweet from zen mode
+            if(activeTweet) {
+                activeTweet.classList.remove('tweet-active');
+                activeTweet = undefined;
+            }
         }
     }
     
@@ -481,6 +493,19 @@ async function renderZenTimeline(options = {}) {
     document.getElementById('loading-box').hidden = true;
     document.getElementById('tweets-loading').hidden = true;
     document.getElementById('load-more').hidden = true; // Hide load more in zen mode
+    
+    // Set focus to the current tweet for interactions (like, bookmark, etc.)
+    // Clear any previously active tweet
+    if(typeof activeTweet !== 'undefined' && activeTweet) {
+        activeTweet.classList.remove('tweet-active');
+    }
+    
+    // Find the rendered tweet and set it as active
+    let currentTweetElement = timelineContainer.querySelector('.tweet');
+    if(currentTweetElement) {
+        currentTweetElement.classList.add('tweet-active');
+        activeTweet = currentTweetElement;
+    }
     
     // Scroll to top to ensure tweet is visible
     window.scrollTo(0, 0);
